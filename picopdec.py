@@ -159,6 +159,68 @@ def parse_zlib(data):
     return data[zlib_hdr:len(data)-4]
 
 
+DEFLATE_EXTRA_LENS = [
+    (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), # 257-264
+    (1,11), (1,13), (1,15), (1,17),      # 265-268
+    (2,19), (2,23), (2,27), (2,31),      # 269-272
+    (3,35), (3,43), (3,51), (3,59),      # 273-276
+    (4,67), (4,83), (4,99), (4,115),     # 277-280
+    (5,131), (5,163), (5,195), (5, 227), # 281-284
+    (0,258)                              # 285
+]
+DEFLATE_EXTRA_DIST = [
+    (0,1), (0,2), (0,3), (0,4), # 0-3
+    (1,5), (1,7),           # 4-5
+    (2,9), (2,13),          # 6-7
+    (3,17), (3,25),         # 8-9
+    (4,33), (4,49),         # 10-11
+    (5,65), (5,97),         # 12-13
+    (6,129), (6,193),       # 14-15
+    (7,257), (7,385),       # 16-17
+    (8,513), (8,769),       # 18-19
+    (9,1025), (9,1537),     # 20-21
+    (10,2049), (10,3073),   # 22-23
+    (11,4097), (11,6145),   # 24-25
+    (12,8193), (12,12289),  # 26-27
+    (13,16385), (13,24577), # 28-29
+]
+DEFLATE_CLEN_ORD = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+
+
+# decode DEFLATE/compressed block (RFC1951, 3.2.5)
+def decode_deflate_data(r, hdec_lit, hdec_dist, data):
+    print(f'    CompressedData')
+    nsym, prevsize = 0, len(data)
+    while True:
+        value = hdec_lit.decode(r)
+        nsym += 1
+        assert 0 <= value <= 285, 'Invalid length code'
+        if value < 256:
+            # literal
+            TRACE(f'      {value}')
+            data.append(value)
+        elif value == 256:
+            # end-of-block
+            TRACE(f'      EOB({value})')
+            break
+        else:
+            # length and distance
+            blen, bias = DEFLATE_EXTRA_LENS[value - 257]
+            extra_bits = r.bits(blen)
+            length = bias + extra_bits
+            TRACE(f'      {value}: length={length} ({bias}+{extra_bits})')
+            dist_code = hdec_dist.decode(r)
+            blen, bias = DEFLATE_EXTRA_DIST[dist_code]
+            extra_bits = r.bits(blen)
+            dist = bias + extra_bits
+            TRACE(f'      {value}: dist={dist} ({bias}+{extra_bits})')
+            n = len(data) - dist
+            for _ in range(length):
+                data.append(data[n])
+                n += 1
+    print(f'    (decode {nsym} symbols to {len(data)-prevsize} bytes)')
+
+
 # decode DEFLATE/code lengths (RFC1951, 3.2.7)
 def decode_deflate_codelens(r, hdec, size, sym):
     result = [0] * size
@@ -192,71 +254,8 @@ def decode_deflate_codelens(r, hdec, size, sym):
     return result
 
 
-# decode DEFLATE/compressed block (RFC1951, 3.2.5)
-def decode_deflate_data(r, hdec_lit, hdec_dist):
-    print(f'    CompressedData')
-    nsym = 0
-    data = bytearray()
-    while True:
-        value = hdec_lit.decode(r)
-        nsym += 1
-        assert 0 <= value <= 285, 'Invalid length code'
-        if value < 256:
-            # literal
-            TRACE(f'      {value}')
-            data.append(value)
-        elif value == 256:
-            # end-of-block
-            TRACE(f'      EOB({value})')
-            break
-        else:
-            # length and distance
-            blen, bias = DEFLATE_EXTRA_LENS[value - 257]
-            extra_bits = r.bits(blen)
-            length = bias + extra_bits
-            TRACE(f'      {value}: length={length} ({bias}+{extra_bits})')
-            dist_code = hdec_dist.decode(r)
-            blen, bias = DEFLATE_EXTRA_DIST[dist_code]
-            extra_bits = r.bits(blen)
-            dist = bias + extra_bits
-            TRACE(f'      {value}: dist={dist} ({bias}+{extra_bits})')
-            n = len(data) - dist
-            for _ in range(length):
-                data.append(data[n])
-                n += 1
-    print(f'    (decode {nsym} symbols to {len(data)} bytes)')
-    return data
-
-
-DEFLATE_CLEN_ORD = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
-DEFLATE_EXTRA_LENS = [
-    (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), # 257-264
-    (1,11), (1,13), (1,15), (1,17),      # 265-268
-    (2,19), (2,23), (2,27), (2,31),      # 269-272
-    (3,35), (3,43), (3,51), (3,59),      # 273-276
-    (4,67), (4,83), (4,99), (4,115),     # 277-280
-    (5,131), (5,163), (5,195), (5, 227), # 281-284
-    (0,258)                              # 285
-]
-DEFLATE_EXTRA_DIST = [
-    (0,1), (0,2), (0,3), (0,4), # 0-3
-    (1,5), (1,7),           # 4-5
-    (2,9), (2,13),          # 6-7
-    (3,17), (3,25),         # 8-9
-    (4,33), (4,49),         # 10-11
-    (5,65), (5,97),         # 12-13
-    (6,129), (6,193),       # 14-15
-    (7,257), (7,385),       # 16-17
-    (8,513), (8,769),       # 18-19
-    (9,1025), (9,1537),     # 20-21
-    (10,2049), (10,3073),   # 22-23
-    (11,4097), (11,6145),   # 24-25
-    (12,8193), (12,12289),  # 26-27
-    (13,16385), (13,24577), # 28-29
-]
-
 # decode DEFLATE/dynamic Huffman codes block (RFC1951, 3.2.7)
-def decode_deflate_dynamic(r):
+def decode_deflate_dynamic(r, data):
     hlit = r.bits(5)
     hdist = r.bits(5)
     hclen = r.bits(4)
@@ -283,7 +282,7 @@ def decode_deflate_dynamic(r):
     hdec_dist = HuffmanDecoder(dist_lens)
     print(f'    DIST_CODES=[{hdec_dist.codes_str()}]')
     # decode compressed data
-    return decode_deflate_data(r, hdec_lit, hdec_dist)
+    return decode_deflate_data(r, hdec_lit, hdec_dist, data)
 
 
 # decode DEFLATE stream (RFC1951)
@@ -305,8 +304,7 @@ def decode_deflate(stream):
             assert False, 'No support fixed Huffman codes block'
         elif btype == 0b10:
             # Compression with dynamic Huffman codes
-            block = decode_deflate_dynamic(r)
-            data.extend(block)
+            decode_deflate_dynamic(r, data)
     print(f'(decode {r.bpos} bytes to {len(data)} bytes)')
     return data
 
@@ -316,8 +314,7 @@ def decode_IDAT(ihdr, idat):
     # decode zlib/deflate stream
     stream = parse_zlib(idat)
     data = decode_deflate(stream)
-
-    # decode image
+    # reconstruct image
     width, height = ihdr['width'], ihdr['height']
     print(f'image: {width}x{height}')
     stride, pixsz = width * 3, 3
