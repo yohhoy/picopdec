@@ -35,6 +35,9 @@ class BitReader():
             s += m
         TRACE(f'BITS: {ret:0{s}b}')
         return ret
+    # byte aligned?
+    def byte_aligned(self):
+        return self.blen == 0
 assert BitReader(b'\x08\x02').bits(10) == 520
 
 
@@ -187,6 +190,20 @@ DEFLATE_EXTRA_DIST = [
 DEFLATE_CLEN_ORD = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 
 
+# decode DEFLATE/non-compressed block (RFC1951, 3.2.4)
+def decode_deflate_raw(r, data):
+    while not r.byte_aligned():
+        r.bits(1)
+    plen = r.bits(16)
+    nlen = r.bits(16)
+    print(f'    LEN={plen}')
+    print(f'    NLEN={nlen}')
+    assert plen ^ nlen == 0xffff, 'Invalid LEN/NLEN field'
+    for _ in range(plen):
+        data.append(r.bits(8))
+    print(f'    (decode raw {plen} bytes)')
+
+
 # decode DEFLATE/compressed block (RFC1951, 3.2.5)
 def decode_deflate_data(r, hdec_lit, hdec_dist, data):
     print(f'    CompressedData')
@@ -219,6 +236,22 @@ def decode_deflate_data(r, hdec_lit, hdec_dist, data):
                 data.append(data[n])
                 n += 1
     print(f'    (decode {nsym} symbols to {len(data)-prevsize} bytes)')
+
+
+# decode DEFLATE/fixed Huffman codes block (RFC1951, 3.2.6)
+def decode_deflate_fixed(r, data):
+    # 'literal and length alphabets' Huffman codes
+    lit_lens = [8] * 144 + [9] * 112 + [7] * 24 + [8] * 8
+    print(f'    LIT_LENS={lit_lens}')
+    hdec_lit = HuffmanDecoder(lit_lens)
+    print(f'    LIT_CODES=[{hdec_lit.codes_str()}]')
+    # 'distance alphabets' Huffman codes
+    dist_lens = [5] * 32
+    print(f'    DIST_LENS={dist_lens}')
+    hdec_dist = HuffmanDecoder(dist_lens)
+    print(f'    DIST_CODES=[{hdec_dist.codes_str()}]')
+    # decode compressed data
+    return decode_deflate_data(r, hdec_lit, hdec_dist, data)
 
 
 # decode DEFLATE/code lengths (RFC1951, 3.2.7)
@@ -298,10 +331,10 @@ def decode_deflate(stream):
         assert btype != 0b11, 'BTYPE=0b11 is reserved'
         if btype == 0b00:
             # Non-compressed blocks
-            assert False, 'No support non-compressed block'
+            decode_deflate_raw(r, data)
         elif btype == 0b01:
             # Compression with fixed Huffman codes
-            assert False, 'No support fixed Huffman codes block'
+            decode_deflate_fixed(r, data)
         elif btype == 0b10:
             # Compression with dynamic Huffman codes
             decode_deflate_dynamic(r, data)

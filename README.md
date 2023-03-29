@@ -9,7 +9,6 @@ This project is intended for study and demonstration, not for practical use. The
     - 'Grayscale' and 'Indexed-colour'(Palette) are not supported
 - interlaced PNG image is not supported
 - ignore all ancillary chunks in PNG format
-- support DEFLATE 'dynamic Huffman codes' only ('fixed Huffman codes' is not supported)
 - output [PPM(portable pixmap)][ppm] image file only
     - write RGB channels, discard alpha channel for RGBA32 image
 
