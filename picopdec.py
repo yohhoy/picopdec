@@ -316,11 +316,12 @@ def decode_IDAT(ihdr, idat):
     data = decode_deflate(stream)
     # reconstruct image
     width, height = ihdr['width'], ihdr['height']
-    print(f'image: {width}x{height}')
-    stride, pixsz = width * 3, 3
+    pixfmt = 'RGB' if ihdr['color'] == 2 else 'RGBA'
+    print(f'image: {width}x{height}, {pixfmt}')
+    pixsz = len(pixfmt)  # 3 or 4
+    pos, stride = 0, width * pixsz
     image = bytearray()
     prevline = bytearray([0] * stride)
-    pos = 0
     for y in range(height):
         ftype = data[pos]
         print(f'  line#{y}: filter={ftype}')
@@ -353,10 +354,10 @@ def decode_IDAT(ihdr, idat):
                 b = prevline[x]
                 c = prevline[x - pixsz] if x >= pixsz else 0
                 line[x] = (line[x] + pred(a, b, c)) & 0xff
-        image.extend(line)
+        image += line
         prevline = line
         pos += 1 + stride
-    return {'size': (width, height), 'data': image}
+    return {'size': (width, height), 'data': image, 'pixfmt': pixfmt}
 
 
 # parse PNG format
@@ -368,11 +369,11 @@ def parse_png(f):
         return struct.unpack('>I4s', f.read(8))
     # first IHDR chunk
     ihdr = parse_IHDR(f, get_chunk(f))
-    assert ihdr['bitdepth'] == 8 and ihdr['color'] == 2, 'Support 8bit-Truecolor only'
-    assert ihdr['interlace'] == 0, 'Support non-interlace only'
+    assert ihdr['bitdepth'] == 8 and ihdr['color'] in (2, 6), 'Support 8bit-Truecolour only'
+    assert ihdr['interlace'] == 0, 'Support non-interlaced only'
     assert ihdr['filter'] == 0, 'Support filter method 0 only'
     # parse subsequent chunks
-    idat = b''
+    idat = bytearray()
     while True:
         chunk = get_chunk(f)
         if chunk[1] == b'IDAT':
@@ -392,9 +393,16 @@ def parse_png(f):
 # write image to PPM (portable pixmal format) file
 def write_ppm(image, outfile):
     width, height = image['size']
+    data = image['data']
+    if image['pixfmt'] == 'RGBA':
+        # convert RGBA to RGB format
+        for n in range(width * height):
+            if data[n*4+3] == 0:
+                data[n*4:n*4+3] = (0, 0, 0)  # transparent -> black
+        data = bytearray([p for i, p in enumerate(data) if i % 4 != 3])
     with open(outfile, 'wb') as f:
         f.write(f'P6\n{width} {height}\n255\n'.encode('ascii'))
-        f.write(image['data'])
+        f.write(data)
 
 
 def main(infile, outfile = None):
