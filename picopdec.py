@@ -148,7 +148,7 @@ def parse_zlib(data):
     print(f'  FDICT(Preset dictionary)={fdict}')
     print(f'  FLEVEL(Compression level)={flevel}')
     assert (cmf*256+flg) % 31 == 0, '{CMF,FLG} shall be multiple of 31'
-    assert cm == 8, 'Support only "deflate" method'
+    assert cm == 8, 'Support "deflate" method only'
     zlib_hdr = 2
     if dict == 1:
         dictid = data[2:6]
@@ -309,8 +309,8 @@ def decode_deflate(stream):
     return data
 
 
-# decode IDAT to image
-def decode_IDAT(ihdr, idat):
+# decode image data
+def decode_image(ihdr, idat):
     # decode zlib/deflate stream
     stream = parse_zlib(idat)
     data = decode_deflate(stream)
@@ -382,12 +382,12 @@ def parse_png(f):
             parse_IEND(f, chunk)
             break  # last chunk
         else:
-            # skip unknown chunk (include PLTE)
+            # skip unrecognized chunk (include PLTE chunk)
             print(f'{chunk[1]}: length={chunk[0]}')
             data = f.read(chunk[0])
             verify_crc(f, chunk, data)
-    # decode IDAT to image
-    return decode_IDAT(ihdr, idat)
+    # decode image data
+    return decode_image(ihdr, idat)
 
 
 # write image to PPM (portable pixmal format) file
@@ -395,11 +395,10 @@ def write_ppm(image, outfile):
     width, height = image['size']
     data = image['data']
     if image['pixfmt'] == 'RGBA':
-        # convert RGBA to RGB format
         for n in range(width * height):
             if data[n*4+3] == 0:
                 data[n*4:n*4+3] = (0, 0, 0)  # transparent -> black
-        data = bytearray([p for i, p in enumerate(data) if i % 4 != 3])
+        del data[3::4]  # remove alpha channel
     with open(outfile, 'wb') as f:
         f.write(f'P6\n{width} {height}\n255\n'.encode('ascii'))
         f.write(data)
