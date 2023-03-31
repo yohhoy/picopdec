@@ -157,9 +157,21 @@ def parse_zlib(data):
         dictid = data[2:6]
         print(f'  DICTID={dictid}')
         zlib_hdr += 4
-    adler32 = struct.unpack('>I', data[len(data)-4:len(data)])[0]
+    adler32 = struct.unpack('>I', data[len(data)-4:])[0]
     print(f'  ADLER32(Adler-32 checksum)=0x{adler32:08x}')
-    return data[zlib_hdr:len(data)-4]
+    return (data[zlib_hdr:len(data)-4], adler32)
+
+
+# Adler-32 checksum (RFC1950, Appendix)
+def calc_adler32(data):
+    def update_adler32(adler, data):
+        BASE = 65521
+        s1, s2 = adler & 0xffff, (adler >> 16) & 0xffff
+        for b in data:
+            s1 = (s1 + b) % BASE
+            s2 = (s2 + s1) % BASE
+        return (s2 << 16) + s1
+    return update_adler32(1, data)
 
 
 DEFLATE_EXTRA_LENS = [
@@ -345,8 +357,9 @@ def decode_deflate(stream):
 # decode image data
 def decode_image(ihdr, idat):
     # decode zlib/deflate stream
-    stream = parse_zlib(idat)
+    stream, checksum = parse_zlib(idat)
     data = decode_deflate(stream)
+    assert checksum == calc_adler32(data)
     # reconstruct image
     width, height = ihdr['width'], ihdr['height']
     pixfmt = 'RGB' if ihdr['color'] == 2 else 'RGBA'
