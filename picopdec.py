@@ -176,12 +176,12 @@ def calc_adler32(data):
 
 DEFLATE_EXTRA_LENS = [
     (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), # 257-264
-    (1,11), (1,13), (1,15), (1,17),      # 265-268
-    (2,19), (2,23), (2,27), (2,31),      # 269-272
-    (3,35), (3,43), (3,51), (3,59),      # 273-276
-    (4,67), (4,83), (4,99), (4,115),     # 277-280
-    (5,131), (5,163), (5,195), (5, 227), # 281-284
-    (0,258)                              # 285
+    (1,11), (1,13), (1,15), (1,17),     # 265-268
+    (2,19), (2,23), (2,27), (2,31),     # 269-272
+    (3,35), (3,43), (3,51), (3,59),     # 273-276
+    (4,67), (4,83), (4,99), (4,115),    # 277-280
+    (5,131), (5,163), (5,195), (5,227), # 281-284
+    (0,258)                             # 285
 ]
 DEFLATE_EXTRA_DIST = [
     (0,1), (0,2), (0,3), (0,4), # 0-3
@@ -354,17 +354,13 @@ def decode_deflate(stream):
     return data
 
 
-# decode image data
-def decode_image(ihdr, idat):
-    # decode zlib/deflate stream
-    stream, checksum = parse_zlib(idat)
-    data = decode_deflate(stream)
-    assert checksum == calc_adler32(data)
-    # reconstruct image
+# reconstruct image
+def reconstruct_image(ihdr, data):
     width, height = ihdr['width'], ihdr['height']
     pixfmt = 'RGB' if ihdr['color'] == 2 else 'RGBA'
     print(f'image: {width}x{height}, {pixfmt}')
     pixsz = len(pixfmt)  # 3 or 4
+    assert len(data) == (1 + width * pixsz) * height, 'Incrorect data size'
     pos, stride = 0, width * pixsz
     image = bytearray()
     prevline = bytearray([0] * stride)
@@ -432,8 +428,12 @@ def parse_png(f):
             print(f'{chunk[1]}: length={chunk[0]}')
             data = f.read(chunk[0])
             verify_crc(f, chunk, data)
-    # decode image data
-    return decode_image(ihdr, idat)
+    # decode zlib/deflate stream
+    stream, checksum = parse_zlib(idat)
+    data = decode_deflate(stream)
+    assert checksum == calc_adler32(data)
+    # reconstruct image
+    return reconstruct_image(ihdr, data)
 
 
 # write image to PPM (portable pixmal format) file
